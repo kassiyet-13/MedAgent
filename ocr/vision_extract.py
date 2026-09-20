@@ -20,10 +20,10 @@ import os
 from pathlib import Path
 from typing import Literal
 
-import anthropic
 import fitz  # pymupdf
 from openai import OpenAI
 
+from llm_clients import get_traced_anthropic_client
 from ocr.schema import LabExtraction, NarrativeExtraction
 
 CLAUDE_MODEL = "claude-sonnet-5"
@@ -87,7 +87,7 @@ def _unwrap_if_needed(data: dict, schema_model: type) -> dict:
 
 
 def _claude_structured(prompt: str, path: Path, schema_model: type, max_tokens: int = 4000) -> dict:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = get_traced_anthropic_client()
     tool_name = f"extract_{schema_model.__name__.lower()}"
 
     if path.suffix.lower() == ".pdf":
@@ -152,6 +152,44 @@ def _gpt4o_structured(prompt: str, path: Path, schema_model: type) -> dict:
     )
     parsed = completion.choices[0].message.parsed
     return parsed.model_dump()
+
+
+CLASSIFY_PROMPT = """Look at this document image/PDF page. Is it primarily a NUMERIC LAB
+TABLE (rows of test markers with numeric values, like a blood panel or coagulation
+panel) or a NARRATIVE DOCUMENT (free-text medical writing, like a discharge summary,
+ultrasound report, or FibroScan report)? Respond with exactly one word: "lab_panel"
+or "narrative"."""
+
+
+def classify_document_type(path: str | Path) -> Literal["lab_panel", "narrative"]:
+    """Cheap classification call (plan Section 2's classify_document_type_node).
+    Runs BEFORE the full extraction call, since extract_lab_panel/extract_narrative
+    use different, type-specific prompts -- classifying first (rather than after,
+    as the earliest architecture sketch had it) avoids a redundant second vision
+    call and lets the graph route directly to the right extraction path."""
+    path = Path(path)
+    client = get_traced_anthropic_client()
+
+    if path.suffix.lower() == ".pdf":
+        content_block = {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": base64.standard_b64encode(path.read_bytes()).decode("utf-8"),
+            },
+        }
+    else:
+        img_b64, media_type = _encode_image(path)
+        content_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_b64}}
+
+    resp = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=10,
+        messages=[{"role": "user", "content": [content_block, {"type": "text", "text": CLASSIFY_PROMPT}]}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text").strip().lower()
+    return "lab_panel" if "lab_panel" in text or "lab panel" in text else "narrative"
 
 
 def extract_lab_panel(path: str | Path, provider: Provider = "claude") -> LabExtraction:

@@ -13,10 +13,16 @@ venv/
 
 # Data (local, real patient data must never be committed unscrubbed)
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/chroma/
 data/sample_documents/*
 !data/sample_documents/.gitkeep
 data/langgraph_checkpoints.db
+data/uploads/
+
+# Playwright MCP test artifacts (snapshots/screenshots from manual browser testing)
+.playwright-mcp/
 
 # Real uploads (never commit raw uploads)
 uploads/

@@ -6,10 +6,18 @@ collections (clinical_guidelines / patient_history) rather than a fourth
 tool -- keeps the MCP surface at 3 substantive tools while serving both
 rag_retrieve_node and followup_chat.
 
-STUB STATUS (Day 2): the Chroma collections don't exist yet -- they're built
-in rag/build_index.py and rag/ingest_patient_doc.py on Day 3. Until then this
-returns a clearly-labeled stub response instead of crashing, so the MCP
-server itself can be stood up and tested end-to-end now.
+Day 3 update: both collections are now real (rag/build_index.py,
+rag/ingest_patient_doc.py) -- the stub path below only fires if a collection
+genuinely hasn't been built yet, e.g. a fresh checkout before running those
+scripts.
+
+IMPORTANT: get_collection() below passes the SAME embedding function
+(rag/embedding.py) used when the collection was created. Chroma does not
+remember a collection's embedding function on its own -- querying without
+explicitly passing it back would silently fall back to Chroma's local
+default embedder, comparing vectors from two different embedding spaces
+and returning meaningless results. This was caught and fixed during Day 3
+build before it could cause a silent retrieval-quality bug.
 """
 from __future__ import annotations
 
@@ -31,20 +39,25 @@ def search_knowledge(query: str, collection: Collection, top_k: int = 4, marker_
     try:
         import chromadb
 
+        from rag.embedding import get_embedding_function
+
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         existing = {c.name for c in client.list_collections()}
         if collection not in existing:
             return {
                 "stub": True,
                 "reason": f"Collection '{collection}' not built yet -- run rag/build_index.py "
-                "(clinical_guidelines) or rag/ingest_patient_doc.py (patient_history) first (Day 3).",
+                "(clinical_guidelines) or rag/ingest_patient_doc.py (patient_history) first.",
                 "query": query,
                 "results": [],
             }
 
-        coll = client.get_collection(collection)
-        where = {"marker_code": marker_filter} if marker_filter else None
-        res = coll.query(query_texts=[query], n_results=top_k, where=where)
+        coll = client.get_collection(collection, embedding_function=get_embedding_function())
+        # marker_filter is accepted for forward-compatibility with a future
+        # per-marker-tagged chunking pass but isn't wired to real metadata
+        # yet (neither collection currently stores a marker_code field) --
+        # left as a documented no-op rather than silently erroring.
+        res = coll.query(query_texts=[query], n_results=top_k)
 
         results = []
         docs = res.get("documents", [[]])[0]
