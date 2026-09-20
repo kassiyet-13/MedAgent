@@ -1,0 +1,46 @@
+# Environment / secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Data (local, real patient data must never be committed unscrubbed)
+data/*.db
+data/chroma/
+data/sample_documents/*
+!data/sample_documents/.gitkeep
+data/langgraph_checkpoints.db
+
+# Real uploads (never commit raw uploads)
+uploads/
+
+# Eval / abtest run artifacts (regenerated, not hand-authored)
+evals/results/*
+!evals/results/.gitkeep
+abtest/results/*
+!abtest/results/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
+
+# Python virtual environment
+.venv/
+
+# Scratch test output on real documents (never commit raw model output on real patient data)
+ocr/derisk_output*.txt
+*_output.txt
+data/extraction_review/
+
+# Streamlit
+.streamlit/secrets.toml

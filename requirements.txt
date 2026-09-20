@@ -1,0 +1,39 @@
+# Orchestration
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+
+# MCP
+mcp>=1.0.0
+
+# Vector store / RAG
+chromadb>=0.5.0
+tiktoken>=0.8.0
+
+# Tracing / evals
+langsmith>=0.1.0
+
+# Data
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+
+# Frontend
+streamlit>=1.38.0
+
+# Document / OCR
+pymupdf>=1.24.0
+pdf2image>=1.17.0
+pillow>=10.0.0
+
+# PDF export
+reportlab>=4.2.0
+
+# Guardrails / PII
+presidio-analyzer>=2.2.0
+presidio-anonymizer>=2.2.0
+
+# Testing
+pytest>=8.0.0
+python-dotenv>=1.0.0
