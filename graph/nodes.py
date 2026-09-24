@@ -16,6 +16,7 @@ from pathlib import Path
 from langgraph.types import interrupt
 from sqlalchemy.orm import Session
 
+from data.dedup import compute_file_hash
 from data.models import Assessment, Document, EscalationLogEntry, LabValueRow
 from data.seed_db import get_engine
 from guardrails.injection_check import check_for_injection
@@ -61,7 +62,12 @@ def _load_skill_content() -> str:
 def ingest_node(state: dict) -> dict:
     path = Path(state["raw_file_path"])
     file_type = "pdf" if path.suffix.lower() == ".pdf" else "image"
-    return {"file_type": file_type, "document_id": state.get("document_id") or uuid.uuid4().hex}
+    content_hash = state.get("content_hash") or compute_file_hash(path.read_bytes())
+    return {
+        "file_type": file_type,
+        "document_id": state.get("document_id") or uuid.uuid4().hex,
+        "content_hash": content_hash,
+    }
 
 
 def classify_document_type_node(state: dict) -> dict:
@@ -245,24 +251,55 @@ Escalation level: {escalation}
 Relevant clinical context (retrieved from clinical_guidelines, cite loosely, don't dump verbatim):
 {rag_text}
 
-Write TWO complete versions of the explanation, Russian first then Kazakh, following the skill's structure exactly.
+Write TWO complete versions of the explanation, KAZAKH FIRST then Russian
+(Kazakh is this app's primary language -- feedback from real use: "Маған ең
+бірінші керек тіл ол қазақша"), following the skill's structure exactly.
+
+IMPORTANT -- plain language (feedback from real use: the first version was
+too clinical/full of medical jargon): write as if explaining to a family
+member with no medical background. Prefer everyday words over clinical
+terms where possible (e.g. "қан ұю көрсеткіштері" over a list of acronyms).
+When a clinical term is genuinely necessary, use it but briefly say what it
+means in the same sentence -- don't assume the reader already knows.
 
 Respond in this exact format:
-RU: <russian explanation>
-KZ: <kazakh explanation>"""
+KZ: <kazakh explanation>
+RU: <russian explanation>"""
 
     client = get_traced_anthropic_client()
     resp = client.messages.create(
-        model=CLAUDE_MODEL, max_tokens=2000, messages=[{"role": "user", "content": prompt}]
+        # 2000 was too low: found via real-usage testing that two full
+        # bilingual explanations (especially after the "explain terms
+        # plainly" instruction made them longer) can hit max_tokens with
+        # Cyrillic text mid-generation -- e.g. one real response completed
+        # a full, good KZ section but got cut off partway through RU,
+        # leaving explanation_ru truncated. Cyrillic burns tokens faster
+        # than English per character, so this needs real headroom.
+        # Raised again 4000->6000: after adding the RAG reranker (wider
+        # candidate pool -> more context in rag_text), a real query in the
+        # chat path (same pattern, see chat/followup_chat.py) hit
+        # stop_reason=="max_tokens" with ZERO output text because Claude
+        # Sonnet 5 spent the whole budget on internal "thinking" tokens
+        # before any visible text -- same risk applies here since this node
+        # also consumes reranked RAG context.
+        model=CLAUDE_MODEL, max_tokens=6000, messages=[{"role": "user", "content": prompt}]
     )
     text = "".join(b.text for b in resp.content if b.type == "text")
 
     ru, kz = "", ""
     if "RU:" in text and "KZ:" in text:
-        ru = text.split("RU:")[1].split("KZ:")[0].strip()
-        kz = text.split("KZ:")[1].strip()
+        kz = text.split("KZ:")[1].split("RU:")[0].strip()
+        ru = text.split("RU:")[1].strip()
     else:
-        ru = text
+        kz = text
+
+    if resp.stop_reason == "max_tokens":
+        # Still truncated even at 4000 -- surface this rather than silently
+        # shipping a sentence that stops mid-word.
+        note_kz = "\n\n(Ескерту: жауап толық аяқталмауы мүмкін.)"
+        note_ru = "\n\n(Примечание: ответ мог быть обрезан.)"
+        kz += note_kz
+        ru += note_ru
 
     return {"explanation_ru": ru, "explanation_kz": kz}
 
@@ -287,7 +324,12 @@ def escalate_unreadable_node(state: dict) -> dict:
 
 
 def save_confirm_node(state: dict) -> dict:
-    payload = interrupt({"kind": "confirm_save", "explanation_ru": state.get("explanation_ru")})
+    """Only signals kind -- the Streamlit UI renders the full result (severity,
+    both languages, MELD chart, glossary cards) from the graph's own returned
+    state rather than from a separate truncated preview in the interrupt
+    payload, per feedback: showing a second, Russian-only, truncated summary
+    screen before the real result was confusing and redundant."""
+    payload = interrupt({"kind": "confirm_save"})
     return {"user_confirmed_save": bool(payload.get("approved"))}
 
 
@@ -301,6 +343,7 @@ def persist_node(state: dict) -> dict:
             document_date=extraction.document_date,
             source_filename=Path(state["raw_file_path"]).name,
             raw_file_path=state["raw_file_path"],
+            content_hash=state.get("content_hash"),
             ocr_confidence=state.get("extraction_confidence"),
             extraction_status="confirmed",
         )
@@ -391,6 +434,7 @@ def ingest_patient_history_node(state: dict) -> dict:
                 document_date=state.get("document_date"),
                 source_filename=Path(state["raw_file_path"]).name,
                 raw_file_path=state["raw_file_path"],
+                content_hash=state.get("content_hash"),
                 extraction_status="confirmed",
             )
         )

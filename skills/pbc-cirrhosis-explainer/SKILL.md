@@ -35,9 +35,13 @@ presenting it as a diagnosis.
    `severity`/`escalation_level` passed in by the graph (never decide the tone
    yourself from the raw numbers -- that decision was already made deterministically
    upstream).
-3. Write TWO full versions, Russian first then Kazakh, each independently complete
-   (not a translation of the other sentence-by-sentence -- natural phrasing in
-   each language).
+3. Write TWO full versions, **Kazakh first then Russian** (Kazakh is this app's
+   primary language, per real-user feedback), each independently complete (not
+   a translation of the other sentence-by-sentence -- natural phrasing in each
+   language). Prefer plain, everyday words over clinical jargon; if a clinical
+   term is necessary, briefly explain it in the same sentence rather than
+   assuming the reader already knows it (real-user feedback: an earlier
+   version read as too clinical/full of unexplained terminology).
 4. Ground every specific claim (a value, a trend direction, a recommendation) in
    the extracted values or the retrieved clinical context passed into the prompt.
    Never state a fact that isn't supported by that input.

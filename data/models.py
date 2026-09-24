@@ -46,6 +46,7 @@ class Document(Base):
     raw_file_path: Mapped[str | None] = mapped_column(default=None)
     ocr_confidence: Mapped[float | None] = mapped_column(default=None)
     extraction_status: Mapped[str] = mapped_column(default="pending")  # pending|confirmed|escalated
+    content_hash: Mapped[str | None] = mapped_column(default=None, index=True)  # SHA-256 of raw file bytes, for upload dedup (data/dedup.py)
 
     patient: Mapped["Patient"] = relationship(back_populates="documents")
     lab_values: Mapped[list["LabValueRow"]] = relationship(back_populates="document")

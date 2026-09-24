@@ -95,6 +95,11 @@ def compute_trend(
     for lab_value, doc_date in rows:
         if lab_value.value_numeric is None:
             continue
+        # A value from a document with no parsed date can't be placed on a
+        # trend timeline (and breaks sorting downstream) -- exclude at the
+        # source rather than special-casing None dates in every consumer.
+        if doc_date is None:
+            continue
         by_marker[lab_value.marker_code].append(
             {"date": doc_date, "value": lab_value.value_numeric, "unit": lab_value.unit}
         )

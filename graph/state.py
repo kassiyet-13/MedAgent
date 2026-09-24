@@ -14,6 +14,7 @@ class MedAgentState(TypedDict, total=False):
     thread_id: str
     raw_file_path: str
     file_type: Literal["image", "pdf"]
+    content_hash: str  # SHA-256 of the raw file bytes, computed in ingest_node -- data/dedup.py
 
     # --- classification / routing ---
     document_type: Literal["lab_panel", "narrative"]

@@ -46,7 +46,13 @@ class LabValue(BaseModel):
 class LabExtraction(BaseModel):
     """Full structured result of OCR-ing one lab panel document."""
 
-    document_date: str | None = Field(default=None, description="ISO date (YYYY-MM-DD) if determinable from the report.")
+    document_date: str | None = Field(
+        default=None,
+        description=(
+            "The sample REGISTRATION date/time, ISO format: 'YYYY-MM-DD' if only a date "
+            "is printed, or 'YYYY-MM-DDTHH:MM' if a registration time is also printed."
+        ),
+    )
     lab_name: str | None = Field(default=None, description="Issuing lab/clinic name, if present (kept for record-keeping, scrubbed before embedding).")
     values: list[LabValue] = Field(default_factory=list)
     overall_confidence: float = Field(

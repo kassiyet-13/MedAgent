@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from data.models import Base, Patient, ReferenceRange
@@ -61,10 +61,52 @@ def seed_default_patient(session: Session) -> None:
         )
 
 
+def ensure_content_hash_column(engine) -> None:
+    """Base.metadata.create_all() only creates missing TABLES, not missing
+    COLUMNS on a table that already exists -- the documents table already had
+    rows in it when content_hash (upload-dedup, data/dedup.py) was added, so
+    this lightweight migration adds the column if it isn't there yet. Safe to
+    call every startup: checked via PRAGMA table_info first."""
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(documents)")).fetchall()}
+        if "content_hash" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN content_hash TEXT"))
+            conn.commit()
+
+
+def backfill_content_hashes(engine) -> int:
+    """Documents created before content_hash existed have NULL for it -- the
+    dedup check (data/dedup.py) can't catch a re-upload of one of those until
+    it's backfilled. Real-usage finding: a user re-uploaded an already-saved
+    analysis right after this feature shipped and got no warning, because the
+    ONLY row for that file still had content_hash=NULL. Idempotent (only
+    touches NULL rows) and safe to call every startup; reads each document's
+    still-on-disk raw_file_path -- a document whose file was since deleted is
+    left as NULL rather than erroring."""
+    from pathlib import Path
+
+    from data.dedup import compute_file_hash
+    from data.models import Document
+
+    updated = 0
+    with Session(engine) as session:
+        docs = session.query(Document).filter(Document.content_hash.is_(None)).all()
+        for doc in docs:
+            if doc.raw_file_path and Path(doc.raw_file_path).exists():
+                doc.content_hash = compute_file_hash(Path(doc.raw_file_path).read_bytes())
+                updated += 1
+        session.commit()
+    return updated
+
+
 def main():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     engine = get_engine()
     Base.metadata.create_all(engine)
+    ensure_content_hash_column(engine)
+    n_backfilled = backfill_content_hashes(engine)
+    if n_backfilled:
+        print(f"Backfilled content_hash for {n_backfilled} existing documents")
 
     with Session(engine) as session:
         n = seed_reference_ranges(session)

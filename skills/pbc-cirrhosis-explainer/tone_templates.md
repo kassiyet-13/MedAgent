@@ -42,5 +42,5 @@ context on what's being monitored and why; (3) light, general wellness note
 
 ## Mandatory disclaimer (all templates, both languages, verbatim from glossary)
 
-RU: Это не является диагнозом. Пожалуйста, обсудите результаты с вашим лечащим врачом.
 KZ: Бұл диагноз емес. Нәтижелерді дәрігеріңізбен талқылаңыз.
+RU: Это не является диагнозом. Пожалуйста, обсудите результаты с вашим лечащим врачом.

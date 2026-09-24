@@ -53,18 +53,28 @@ def search_knowledge(query: str, collection: Collection, top_k: int = 4, marker_
             }
 
         coll = client.get_collection(collection, embedding_function=get_embedding_function())
+        if coll.count() == 0:
+            return {"stub": False, "query": query, "results": []}
         # marker_filter is accepted for forward-compatibility with a future
         # per-marker-tagged chunking pass but isn't wired to real metadata
         # yet (neither collection currently stores a marker_code field) --
         # left as a documented no-op rather than silently erroring.
-        res = coll.query(query_texts=[query], n_results=top_k)
 
-        results = []
+        # Retrieve a wider embedding-similarity candidate pool than top_k,
+        # then rerank down to top_k (rag/rerank.py). Real bug found via
+        # actual use: plain embedding similarity ranked the one relevant
+        # chunk 13th out of 33 in a single document for a real query -- top_k
+        # alone (previously requested straight from Chroma) was nowhere near
+        # enough. n_results is capped by the collection's actual size.
+        candidate_pool = min(max(top_k * 5, 20), coll.count())
+        res = coll.query(query_texts=[query], n_results=candidate_pool)
+
+        candidates = []
         docs = res.get("documents", [[]])[0]
         metas = res.get("metadatas", [[]])[0]
         dists = res.get("distances", [[]])[0]
         for doc, meta, dist in zip(docs, metas, dists):
-            results.append(
+            candidates.append(
                 {
                     "chunk_text": doc,
                     "source_title": (meta or {}).get("source_title"),
@@ -73,6 +83,10 @@ def search_knowledge(query: str, collection: Collection, top_k: int = 4, marker_
                     "similarity_score": 1 - dist if dist is not None else None,
                 }
             )
+
+        from rag.rerank import rerank
+
+        results = rerank(query, candidates, top_k) if candidates else candidates
         return {"stub": False, "query": query, "results": results}
 
     except ImportError:
