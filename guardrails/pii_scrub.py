@@ -39,6 +39,10 @@ _LABEL_PATTERNS: list[tuple[str, str]] = [
     ("patient_name", r"(?:Пациент(?:ка)?|ТАӘ\s*\(ФИО\)|ФИО)\s*:\s*([^\n,]+)"),
     ("dob", r"(\d{2}[./]\d{2}[./]\d{4})\s*г\.?\s*р\.?"),
     ("dob_labeled", r"(?:Туған\s*к[үu]ні|Дата\s*рождения)\s*(?:\(Дата\s*рождения\))?\s*:\s*([^\n,]+)"),
+    # Same label WITHOUT a colon, value must be date-shaped. Found in a real
+    # ultrasound report: "Пациент: ..., дата рождения 22.07.1957" -- the
+    # colon-only pattern above missed it and the DOB reached the vector store.
+    ("dob_inline", r"(?:Туған\s*к[үu]ні|Дата\s*рождения)\s*[-–]?\s*(\d{1,2}[./]\d{1,2}[./]\d{2,4})"),
     ("iin", r"(?:ЖСН|ИИН)\s*(?:\(ИИН\))?\s*:\s*(\d{10,12})"),
     ("address", r"(?:Мекен-жайы|Адрес)\s*(?:\(Адрес\))?\s*:\s*([^\n]+)"),
     ("phone_labeled", r"(?:Телефон|Тел\.?)\s*:\s*([\d\s()+-]{7,})"),
@@ -85,6 +89,21 @@ _CONTEXTUAL_STAFF_PATTERN = _ROLE_CONTEXT_WORDS + r"[^.\n]{0,40}?(" + _NAME_SHAP
 # against lab values, which almost never run that many consecutive digits.
 _BARE_IIN_PATTERN = r"\b\d{12}\b"
 
+_DATE_LIKE = re.compile(r"\d{1,2}\.\d{1,2}\.\d{2,4}")
+
+# "Пациентка SURNAME И.О., ... поступила" -- no colon, and the surname is
+# in capitals, so neither the "Пациент:" label pattern nor the title-case
+# name shape caught it (found in a real discharge summary's body text).
+# Case-SENSITIVE on purpose, like the contextual staff pattern: the name must
+# start with a capital, so "Пациентка выписывается ..." is left alone.
+_UPPER = "А-ЯӘҒҚҢӨҰҮҺІ"
+_LOWER = "а-яәғқңөұүһі"
+_PATIENT_INLINE_PATTERN = (
+    rf"Пациент(?:ка|а|у|ке)?\s+("
+    rf"(?:[{_UPPER}]{{2,}}|[{_UPPER}][{_LOWER}]{{2,}})"
+    rf"(?:\s+[{_UPPER}]\.\s?(?:[{_UPPER}]\.)?|(?:\s+(?:[{_UPPER}]{{2,}}|[{_UPPER}][{_LOWER}]{{2,}})){{1,2}}))"
+)
+
 
 def scrub_narrative_text(text: str) -> ScrubResult:
     found: list[str] = []
@@ -109,6 +128,12 @@ def scrub_narrative_text(text: str) -> ScrubResult:
     # lowercase below to match their most common mid-sentence form.
     result = re.sub(_CONTEXTUAL_STAFF_PATTERN, _replace_staff, result)
 
+    def _replace_patient_inline(m: re.Match) -> str:
+        found.append("patient_name_inline")
+        return m.group(0).replace(m.group(1), REDACTION_TOKEN)
+
+    result = re.sub(_PATIENT_INLINE_PATTERN, _replace_patient_inline, result)
+
     def _replace_iin(m: re.Match) -> str:
         found.append("bare_iin_like_number")
         return REDACTION_TOKEN
@@ -131,6 +156,14 @@ def scrub_with_presidio(text: str) -> ScrubResult:
 
     analyzer = AnalyzerEngine()
     results = analyzer.analyze(text=text, language="en", entities=["PHONE_NUMBER", "EMAIL_ADDRESS", "URL"])
+    # Presidio's phone recognizer also fires on dotted dates + times: a real
+    # discharge summary's "Дата поступления: 04.05.2023 13:08" came out as
+    # "<PHONE_NUMBER>:08", destroying a clinically relevant date. Dates are
+    # not PII here (dates of birth are handled by the dob patterns above).
+    results = [
+        r for r in results
+        if not (r.entity_type == "PHONE_NUMBER" and _DATE_LIKE.search(text[r.start:r.end]))
+    ]
     if not results:
         return ScrubResult(text=text, redaction_types_found=[])
 

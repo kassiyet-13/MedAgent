@@ -26,7 +26,16 @@ _INJECTION_PATTERNS = [
     r"\bигнорируй\s+(все\s+)?(предыдущие|предыдущий)\s+(инструкции|указания)\b",
     r"\bновые\s+инструкции\s*:",
     r"\bты\s+теперь\b",
+    r"\b(забудь|не\s+обращай\s+внимания\s+на)\s+(все\s+)?(предыдущие\s+)?(инструкции|указания)\b",
+    # Kazakh -- the eval's adversarial set (evals/golden_dataset, adv_03)
+    # showed the single KZ pattern below missed an ordinary "ignore the
+    # previous instructions" phrasing. Matches the verb family (елеме/
+    # ескерме/орындама + suffixes) after any form of "нұсқау", and
+    # "previous instructions" itself.
     r"\bсенің\s+жаңа\s+н[ұu]сқауың\b",
+    r"\bн[ұu]сқау\w*\s+(елеме|ескерме|орындама)\w*",
+    r"\b(алдыңғы|бұрынғы|жоғарыдағы)\s+(барлық\s+)?н[ұu]сқау\w*",
+    r"\bжаңа\s+н[ұu]сқау\w*\s*:",
 ]
 
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in _INJECTION_PATTERNS]
