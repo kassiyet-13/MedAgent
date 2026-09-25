@@ -54,3 +54,6 @@ data/extraction_review/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Course requirements document (not for public distribution)
+Project_req.pdf
