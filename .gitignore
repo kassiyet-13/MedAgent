@@ -20,12 +20,16 @@ data/sample_documents/*
 !data/sample_documents/.gitkeep
 data/langgraph_checkpoints.db
 data/uploads/
+data/lab_queue.json
 
 # Playwright MCP test artifacts (snapshots/screenshots from manual browser testing)
 .playwright-mcp/
 
 # Real uploads (never commit raw uploads)
 uploads/
+
+# Golden dataset part built from real patient documents (local only)
+evals/golden_dataset/golden_real.json
 
 # Eval / abtest run artifacts (regenerated, not hand-authored)
 evals/results/*

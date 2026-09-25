@@ -237,7 +237,7 @@ else:
     for ym in sorted(by_year_month.keys(), reverse=True):
         st.markdown(f"**{ym}**")
         rows = [
-            {"Күні": d.document_date or "—", "Түрі": d.document_type, "Жіктелімі": d.document_kind or "", "Файл": d.source_filename}
+            {"Күні": d.document_date or "—", "Түрі": d.document_type, "Жіктелімі": d.panel_name or d.document_kind or "", "Зертхана": d.lab_name or "", "Файл": d.source_filename}
             for d in by_year_month[ym]
         ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

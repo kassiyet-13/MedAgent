@@ -41,6 +41,8 @@ class Document(Base):
     document_type: Mapped[str] = mapped_column()  # "lab_panel" | "narrative"
     document_kind: Mapped[str | None] = mapped_column(default=None)  # e.g. discharge_summary, fibroscan_report
     document_date: Mapped[str | None] = mapped_column(default=None)  # ISO date, as extracted
+    lab_name: Mapped[str | None] = mapped_column(default=None)  # issuing lab/clinic, lab panels only
+    panel_name: Mapped[str | None] = mapped_column(default=None)  # e.g. "Общий анализ крови", lab panels only
     uploaded_at: Mapped[dt.datetime] = mapped_column(default=dt.datetime.utcnow)
     source_filename: Mapped[str | None] = mapped_column(default=None)
     raw_file_path: Mapped[str | None] = mapped_column(default=None)

@@ -82,6 +82,9 @@ your best-guess marker_code matching this app's known codes if confident ({', '.
 or null if unsure, the value, unit,
 the reference range AS PRINTED ON THIS REPORT, and any flag symbol shown.
 Also set document_date to this specific test's date (see date guidance below).
+Set lab_name to the issuing lab/clinic name, and panel_name to the name of the analysis as
+printed on the report (e.g. "Общий анализ крови", "Общий анализ мочи", "Биохимический анализ
+крови", "Коагулограмма") -- if there are several panels, list all of them joined with ", ".
 
 IMPORTANT -- not every result is numeric: some markers report a qualitative result instead
 of a number, e.g. "отсутствуют"/"обнаружены" (absent/detected), "отрицательно"/"положительно"

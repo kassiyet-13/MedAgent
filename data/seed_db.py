@@ -86,6 +86,19 @@ def ensure_value_text_column(engine) -> None:
             conn.commit()
 
 
+def ensure_document_meta_columns(engine) -> None:
+    """Same pattern as ensure_content_hash_column -- documents.lab_name and
+    documents.panel_name (analysis name, e.g. "Общий анализ крови") were added
+    after the table already had rows. Before this, lab_name was extracted and
+    shown in the UI but never persisted."""
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(documents)")).fetchall()}
+        for col in ("lab_name", "panel_name"):
+            if col not in cols:
+                conn.execute(text(f"ALTER TABLE documents ADD COLUMN {col} TEXT"))
+        conn.commit()
+
+
 def backfill_content_hashes(engine) -> int:
     """Documents created before content_hash existed have NULL for it -- the
     dedup check (data/dedup.py) can't catch a re-upload of one of those until
@@ -117,6 +130,7 @@ def main():
     Base.metadata.create_all(engine)
     ensure_content_hash_column(engine)
     ensure_value_text_column(engine)
+    ensure_document_meta_columns(engine)
     n_backfilled = backfill_content_hashes(engine)
     if n_backfilled:
         print(f"Backfilled content_hash for {n_backfilled} existing documents")

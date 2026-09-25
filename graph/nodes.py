@@ -171,6 +171,10 @@ def classify_severity_node(state: dict) -> dict:
     extraction = LabExtraction(**state["extraction"])
     ranges = state.get("reference_ranges", {})
 
+    # No early break on the first critical value -- found via the effort
+    # experiment: the loop used to stop there, so a critical panel never got
+    # its OTHER out-of-range markers collected, and the explanation prompt's
+    # "must mention" list was empty in exactly the most serious case.
     critical_hit = None
     out_of_range_markers = []
     for v in extraction.values:
@@ -179,19 +183,24 @@ def classify_severity_node(state: dict) -> dict:
         r = ranges.get(v.marker_code)
         if not r:
             continue
-        if r.get("critical_low") is not None and v.value <= r["critical_low"]:
-            critical_hit = (v.marker_code, "below_critical_low")
-            break
-        if r.get("critical_high") is not None and v.value >= r["critical_high"]:
-            critical_hit = (v.marker_code, "above_critical_high")
-            break
+        if critical_hit is None:
+            if r.get("critical_low") is not None and v.value <= r["critical_low"]:
+                critical_hit = (v.marker_code, "below_critical_low")
+            elif r.get("critical_high") is not None and v.value >= r["critical_high"]:
+                critical_hit = (v.marker_code, "above_critical_high")
         if r.get("normal_low") is not None and v.value < r["normal_low"]:
             out_of_range_markers.append(v.marker_code)
         elif r.get("normal_high") is not None and v.value > r["normal_high"]:
             out_of_range_markers.append(v.marker_code)
 
     if critical_hit:
-        return {"severity": "critical", "escalation_level": "seek_care_now", "_critical_marker": critical_hit[0], "_critical_reason": critical_hit[1]}
+        return {
+            "severity": "critical",
+            "escalation_level": "seek_care_now",
+            "_critical_marker": critical_hit[0],
+            "_critical_reason": critical_hit[1],
+            "_out_of_range_markers": out_of_range_markers,
+        }
 
     directions = [m["direction"] for m in state.get("trend", {}).get("markers", {}).values()]
     if "worsening" in directions or out_of_range_markers:
@@ -243,7 +252,9 @@ def rag_retrieve_node(state: dict) -> dict:
 # --- Explanation generation ---
 
 
-def generate_explanation_node(state: dict) -> dict:
+def build_explanation_prompt(state: dict) -> str:
+    """Split out of generate_explanation_node so abtest/ experiments call the
+    exact production prompt rather than a copy that could drift from it."""
     extraction = LabExtraction(**state["extraction"])
     ranges = state.get("reference_ranges", {})
     # Reference ranges included alongside values -- real-usage bug found: this
@@ -305,7 +316,39 @@ means in the same sentence -- don't assume the reader already knows.
 Respond in this exact format:
 KZ: <kazakh explanation>
 RU: <russian explanation>"""
+    return prompt
 
+
+def parse_explanation(text: str, stop_reason: str | None) -> tuple[str, str]:
+    """Returns (kz, ru)."""
+    ru, kz = "", ""
+    if "RU:" in text and "KZ:" in text:
+        kz = text.split("KZ:")[1].split("RU:")[0].strip()
+        ru = text.split("RU:")[1].strip()
+    else:
+        kz = text
+
+    if stop_reason == "max_tokens":
+        # Still truncated even at 4000 -- surface this rather than silently
+        # shipping a sentence that stops mid-word.
+        kz += "\n\n(Ескерту: жауап толық аяқталмауы мүмкін.)"
+        ru += "\n\n(Примечание: ответ мог быть обрезан.)"
+    return kz, ru
+
+
+# Claude Sonnet 5 rejects temperature/top_p (400) and thinks by default, so
+# effort is its main quality/latency hyperparameter -- chosen by
+# abtest/run_hyperparam_sweep.py (6 real confirmed panels x low/medium/high,
+# see EVALS.md): "high" (the API default, used until now) was ~2x slower
+# (70.9s vs 37.5s mean) and ~2x costlier with no quality gain, and once spent
+# the whole 6000-token budget thinking, truncating the RU text. low and
+# medium scored identically; medium kept as a small safety margin for
+# medical content at +3.6s over low.
+EXPLANATION_EFFORT = "medium"
+
+
+def generate_explanation_node(state: dict) -> dict:
+    prompt = build_explanation_prompt(state)
     client = get_traced_anthropic_client()
     resp = client.messages.create(
         # 2000 was too low: found via real-usage testing that two full
@@ -322,25 +365,13 @@ RU: <russian explanation>"""
         # Sonnet 5 spent the whole budget on internal "thinking" tokens
         # before any visible text -- same risk applies here since this node
         # also consumes reranked RAG context.
-        model=CLAUDE_MODEL, max_tokens=6000, messages=[{"role": "user", "content": prompt}]
+        model=CLAUDE_MODEL,
+        max_tokens=6000,
+        output_config={"effort": EXPLANATION_EFFORT},
+        messages=[{"role": "user", "content": prompt}],
     )
     text = "".join(b.text for b in resp.content if b.type == "text")
-
-    ru, kz = "", ""
-    if "RU:" in text and "KZ:" in text:
-        kz = text.split("KZ:")[1].split("RU:")[0].strip()
-        ru = text.split("RU:")[1].strip()
-    else:
-        kz = text
-
-    if resp.stop_reason == "max_tokens":
-        # Still truncated even at 4000 -- surface this rather than silently
-        # shipping a sentence that stops mid-word.
-        note_kz = "\n\n(Ескерту: жауап толық аяқталмауы мүмкін.)"
-        note_ru = "\n\n(Примечание: ответ мог быть обрезан.)"
-        kz += note_kz
-        ru += note_ru
-
+    kz, ru = parse_explanation(text, resp.stop_reason)
     return {"explanation_ru": ru, "explanation_kz": kz}
 
 
@@ -381,6 +412,8 @@ def persist_node(state: dict) -> dict:
             patient_id=state["patient_id"],
             document_type="lab_panel",
             document_date=extraction.document_date,
+            lab_name=extraction.lab_name,
+            panel_name=extraction.panel_name,
             source_filename=Path(state["raw_file_path"]).name,
             raw_file_path=state["raw_file_path"],
             content_hash=state.get("content_hash"),

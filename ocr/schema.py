@@ -67,6 +67,14 @@ class LabExtraction(BaseModel):
         ),
     )
     lab_name: str | None = Field(default=None, description="Issuing lab/clinic name, if present (kept for record-keeping, scrubbed before embedding).")
+    panel_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the analysis/panel as printed on the report, e.g. 'Общий анализ крови', "
+            "'Общий анализ мочи', 'Биохимический анализ крови', 'Коагулограмма'. If the document "
+            "contains several panels, list them joined with ', '."
+        ),
+    )
     values: list[LabValue] = Field(default_factory=list)
     overall_confidence: float = Field(
         ge=0.0, le=1.0, description="Model's self-assessed confidence in the extraction as a whole (0-1)."
