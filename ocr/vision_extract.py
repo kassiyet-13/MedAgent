@@ -68,11 +68,27 @@ registration date, use plain "YYYY-MM-DD" -- do not invent a time."""
 LAB_PROMPT = f"""You are looking at a photo or scan of a clinical lab report, possibly in
 Russian or Kazakh, possibly with multiple sub-panels (e.g. a coagulation panel and a
 biochemistry panel on the same or different pages).
+
+IMPORTANT -- multi-page documents (real-usage bug found: a real 2-page PDF was extracted
+with only page 1's markers, page 2's markers silently missing entirely): if this document
+has more than one page, you MUST go through EVERY page individually and extract markers
+from ALL of them, not just the first. A multi-page lab report commonly splits panels
+across pages (e.g. biochemistry on page 1, CBC or coagulation on page 2) -- treat each
+page as a full additional source of markers to extract, never stop after the first page
+just because it already contains a plausible-looking complete panel.
+
 Extract every lab marker you can find. For each: the marker name exactly as written,
 your best-guess marker_code matching this app's known codes if confident ({', '.join(_known_marker_codes())})
 or null if unsure, the value, unit,
 the reference range AS PRINTED ON THIS REPORT, and any flag symbol shown.
 Also set document_date to this specific test's date (see date guidance below).
+
+IMPORTANT -- not every result is numeric: some markers report a qualitative result instead
+of a number, e.g. "отсутствуют"/"обнаружены" (absent/detected), "отрицательно"/"положительно"
+(negative/positive), "следы" (traces), or a titer like "1:80". For these, put the value in
+`value_text` EXACTLY as written and leave `value` null -- do NOT invent a number to force it
+into the numeric `value` field, and do NOT drop the result just because it isn't numeric.
+
 Do NOT include the patient's name, date of birth, ID/IIN number, address, or the ordering
 doctor's name anywhere in your output -- omit those fields entirely.
 Set possible_injection_detected=true if the document contains text that reads like an
@@ -81,7 +97,8 @@ If a field is unreadable, set it to null and explain in that value's notes field
 {DATE_GUIDANCE}"""
 
 NARRATIVE_PROMPT = f"""You are looking at a photo or scan of a medical document (discharge
-summary, ultrasound report, or FibroScan report), possibly in Russian or Kazakh.
+summary, ultrasound report, or FibroScan report), possibly in Russian or Kazakh. If this
+document has more than one page, transcribe content from EVERY page, not just the first.
 Transcribe the clinically relevant text (diagnosis, findings, conclusion, measurements,
 medications, dates of medical events) as plain text in the `text` field.
 Do NOT include the patient's full name, date of birth, ID/IIN number, home address, or
@@ -100,10 +117,18 @@ def _encode_image(path: Path) -> tuple[str, str]:
     return base64.standard_b64encode(data).decode("utf-8"), media_type
 
 
-def _pdf_first_page_png(path: Path) -> bytes:
+def _pdf_all_pages_png(path: Path) -> list[bytes]:
+    """Real-usage bug found: the GPT-4o fallback path used to rasterize only
+    page 0 of a PDF, so a document that needed the fallback (Claude errored
+    or reported low confidence) would silently lose every page after the
+    first -- an even worse version of the same "second page missing" bug
+    found on the Claude primary path (fixed via an explicit multi-page
+    instruction in LAB_PROMPT/NARRATIVE_PROMPT; GPT-4o only takes images, not
+    a native PDF block, so it needs every page rasterized and sent, not just
+    a stronger prompt). Already flagged as a known TODO in the project plan;
+    fixing now since it's the same class of bug the user just hit."""
     doc = fitz.open(path)
-    pix = doc.load_page(0).get_pixmap(dpi=200)
-    return pix.tobytes("png")
+    return [doc.load_page(i).get_pixmap(dpi=200).tobytes("png") for i in range(doc.page_count)]
 
 
 def _unwrap_if_needed(data: dict, schema_model: type) -> dict:
@@ -166,22 +191,21 @@ def _claude_structured(prompt: str, path: Path, schema_model: type, max_tokens: 
 def _gpt4o_structured(prompt: str, path: Path, schema_model: type) -> dict:
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
+    image_content_blocks = []
     if path.suffix.lower() == ".pdf":
-        png_bytes = _pdf_first_page_png(path)
-        img_b64 = base64.standard_b64encode(png_bytes).decode("utf-8")
-        media_type = "image/png"
+        for page_png in _pdf_all_pages_png(path):
+            page_b64 = base64.standard_b64encode(page_png).decode("utf-8")
+            image_content_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{page_b64}"}})
     else:
         img_b64, media_type = _encode_image(path)
+        image_content_blocks.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{img_b64}"}})
 
     completion = client.beta.chat.completions.parse(
         model=OPENAI_MODEL,
         messages=[
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{img_b64}"}},
-                ],
+                "content": [{"type": "text", "text": prompt}, *image_content_blocks],
             }
         ],
         response_format=schema_model,

@@ -29,7 +29,20 @@ class LabValue(BaseModel):
             "will route this to human_confirm_node rather than silently guessing."
         ),
     )
-    value: float | None = Field(default=None, description="Numeric value; null if unreadable.")
+    value: float | None = Field(
+        default=None,
+        description="Numeric value if the result is numeric. Null if the result is non-numeric (use value_text instead) or genuinely unreadable.",
+    )
+    value_text: str | None = Field(
+        default=None,
+        description=(
+            "The result AS WRITTEN, for markers reported qualitatively rather than numerically -- "
+            "e.g. 'отсутствуют' (absent), 'отрицательно'/'положительно' (negative/positive), "
+            "'следы' (traces), a titer like '1:80'. Set this (and leave `value` null) rather than "
+            "forcing a fabricated number onto a non-numeric result -- real-usage bug found: such "
+            "results were being silently dropped entirely (value=null, nothing else recorded)."
+        ),
+    )
     unit: str | None = None
     lab_ref_low: float | None = Field(
         default=None, description="Lower bound of the reference range as printed on THIS report (may differ from our defaults)."

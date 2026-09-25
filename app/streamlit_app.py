@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = ROOT / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-st.set_page_config(page_title="MedAgent", page_icon="🩺", layout="centered")
+st.set_page_config(page_title="MedAgent", page_icon="🩺", layout="wide")
 
 SEVERITY_COLOR = {
     "critical": "🔴",
@@ -260,7 +260,11 @@ def _render_lab_result(result: dict) -> None:
         for v in values:
             blurb = get_marker_blurb(v.get("marker_code"), lang="kz")
             if blurb:
-                label = f"{v.get('marker_name_as_written')}: {v.get('value')} {v.get('unit') or ''}"
+                # Qualitative results (e.g. "отсутствуют", "1:80") have no
+                # numeric value -- show value_text instead rather than a
+                # blank/"None" reading, per the value_text fix above.
+                shown_value = v.get("value") if v.get("value") is not None else v.get("value_text")
+                label = f"{v.get('marker_name_as_written')}: {shown_value} {v.get('unit') or ''}"
                 with st.expander(label):
                     st.write(blurb)
 
@@ -282,9 +286,63 @@ if result is not None:
             if inconsistent:
                 st.warning(f"Бұл жолдар өз референс диапазонынан тыс, бірақ жалаушасыз: {', '.join(inconsistent)}")
 
+            # Document-level metadata above the values table -- feedback:
+            # "файлды анализді оқып болған соң метаданныйларды кестенің
+            # жоғары жағына шығаршы" (show the document metadata above the
+            # table). Editable, same reasoning as the values table itself --
+            # document_date extraction has already had one real bug found
+            # (letterhead date vs actual registration date), so letting the
+            # user correct it here rather than only being able to fix
+            # individual marker values makes sense.
+            meta_col1, meta_col2 = st.columns(2)
+            edited_document_date = meta_col1.text_input(
+                "Тіркеу күні (registration date)",
+                value=payload["extraction"].get("document_date") or "",
+                key=f"doc_date_{st.session_state.thread_id}",
+            )
+            edited_lab_name = meta_col2.text_input(
+                "Зертхана атауы (lab name)",
+                value=payload["extraction"].get("lab_name") or "",
+                key=f"lab_name_{st.session_state.thread_id}",
+            )
+            st.caption(f"Модельдің жалпы сенімділігі: {payload['extraction'].get('overall_confidence', '—')}")
+
             values = payload["extraction"]["values"]
             df = pd.DataFrame(values)
-            edited_df = st.data_editor(df, num_rows="dynamic", key="edit_extraction")
+
+            # Out-of-range flag column -- feedback: highlight abnormal values
+            # with a color. st.data_editor (needed here since the table must
+            # stay editable) does NOT support cell/row background styling the
+            # way read-only st.dataframe does (a Streamlit limitation, not a
+            # choice) -- a status column is the equivalent that actually
+            # works in an editable grid. 🔴 red matches both real lab-report
+            # convention for an abnormal flag and this app's own severity
+            # color scheme (SEVERITY_COLOR above uses 🔴 for "critical").
+            def _status(row) -> str:
+                v, lo, hi = row.get("value"), row.get("lab_ref_low"), row.get("lab_ref_high")
+                if v is None or lo is None or hi is None:
+                    return ""
+                return "🔴" if not (lo <= v <= hi) else "🟢"
+
+            if not df.empty:
+                df.insert(0, "Күй", df.apply(_status, axis=1))
+
+            # No internal scrollbar -- feedback: "барлық көрсеткіштерді
+            # сиятындай етіп кеңейт" (expand so every row fits, no
+            # scrolling). st.data_editor defaults to a fixed viewport height;
+            # sizing it to the actual row count (~35px/row, Streamlit's own
+            # row height) makes every row visible without scrolling.
+            table_height = min(len(df) + 1, 60) * 35 + 3
+            edited_df = st.data_editor(
+                df,
+                num_rows="dynamic",
+                key="edit_extraction",
+                use_container_width=True,
+                height=table_height,
+                column_config={"Күй": st.column_config.TextColumn("Күй", disabled=True, width="small")},
+            )
+            if "Күй" in edited_df.columns:
+                edited_df = edited_df.drop(columns=["Күй"])
 
             # Semi-automated new-marker onboarding -- user question: "сонда
             # әркез мен өзім қосып отыруым керек пе?" (do I have to add every
@@ -382,6 +440,8 @@ if result is not None:
                             record["marker_code"] = approved_code
                 edited_extraction = dict(payload["extraction"])
                 edited_extraction["values"] = cleaned_records
+                edited_extraction["document_date"] = edited_document_date or None
+                edited_extraction["lab_name"] = edited_lab_name or None
                 with st.spinner("Жалғасуда..."):
                     new_result = graph.invoke(
                         Command(resume={"approved": True, "extraction": edited_extraction}), config=config

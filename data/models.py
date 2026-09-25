@@ -80,6 +80,7 @@ class LabValueRow(Base):
     marker_code: Mapped[str | None] = mapped_column(default=None)
     marker_name_as_written: Mapped[str] = mapped_column()
     value_numeric: Mapped[float | None] = mapped_column(default=None)
+    value_text: Mapped[str | None] = mapped_column(default=None)  # qualitative result as written, e.g. "отсутствуют", "1:80" -- see ocr/schema.py::LabValue.value_text
     unit: Mapped[str | None] = mapped_column(default=None)
     lab_reported_ref_low: Mapped[float | None] = mapped_column(default=None)
     lab_reported_ref_high: Mapped[float | None] = mapped_column(default=None)

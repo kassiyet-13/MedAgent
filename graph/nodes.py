@@ -103,7 +103,7 @@ def validate_extraction_node(state: dict) -> dict:
             out_of_range = not (v.lab_ref_low <= v.value <= v.lab_ref_high)
             if out_of_range and not v.lab_flag:
                 flagged_rows.append(v.marker_name_as_written)
-        for text_field in (v.marker_name_as_written, v.notes or ""):
+        for text_field in (v.marker_name_as_written, v.notes or "", v.value_text or ""):
             flagged, _ = check_for_injection(text_field)
             injection_hit = injection_hit or flagged
     return {
@@ -155,11 +155,24 @@ def compute_trend_node(state: dict) -> dict:
 
 def classify_severity_node(state: dict) -> dict:
     """Deterministic rule engine -- plan Section 2/3: severity/escalation
-    decisions must be testable, never LLM-generated."""
+    decisions must be testable, never LLM-generated.
+
+    Real-usage bug found: a ferritin reading of 748.83 against a normal
+    range of 12-135 (>5x the upper bound) was classified "stable" -- this
+    rule engine previously checked ONLY critical_low/critical_high (usually
+    unset for a marker added via the suggest-and-approve flow, since that
+    UI doesn't even expose critical-threshold fields) and trend DIRECTION
+    (meaningless on a marker's first-ever reading, which reports
+    "insufficient_data" and was silently treated the same as "stable" by
+    the old fallback). A value simply outside its own NORMAL range -- even
+    without crossing a separate, rarer "critical" cutoff, and even with no
+    prior reading to compare a trend against -- must not be invisible to
+    this classifier."""
     extraction = LabExtraction(**state["extraction"])
     ranges = state.get("reference_ranges", {})
 
     critical_hit = None
+    out_of_range_markers = []
     for v in extraction.values:
         if not v.marker_code or v.value is None:
             continue
@@ -172,13 +185,17 @@ def classify_severity_node(state: dict) -> dict:
         if r.get("critical_high") is not None and v.value >= r["critical_high"]:
             critical_hit = (v.marker_code, "above_critical_high")
             break
+        if r.get("normal_low") is not None and v.value < r["normal_low"]:
+            out_of_range_markers.append(v.marker_code)
+        elif r.get("normal_high") is not None and v.value > r["normal_high"]:
+            out_of_range_markers.append(v.marker_code)
 
     if critical_hit:
         return {"severity": "critical", "escalation_level": "seek_care_now", "_critical_marker": critical_hit[0], "_critical_reason": critical_hit[1]}
 
     directions = [m["direction"] for m in state.get("trend", {}).get("markers", {}).values()]
-    if "worsening" in directions:
-        return {"severity": "worsening", "escalation_level": "see_doctor_soon"}
+    if "worsening" in directions or out_of_range_markers:
+        return {"severity": "worsening", "escalation_level": "see_doctor_soon", "_out_of_range_markers": out_of_range_markers}
     if directions and all(d in ("improving", "stable") for d in directions):
         return {"severity": "improving" if "improving" in directions else "stable", "escalation_level": "routine"}
     return {"severity": "stable", "escalation_level": "routine"}
@@ -228,9 +245,31 @@ def rag_retrieve_node(state: dict) -> dict:
 
 def generate_explanation_node(state: dict) -> dict:
     extraction = LabExtraction(**state["extraction"])
-    values_summary = "\n".join(
-        f"- {v.marker_name_as_written} ({v.marker_code}): {v.value} {v.unit or ''}" for v in extraction.values
+    ranges = state.get("reference_ranges", {})
+    # Reference ranges included alongside values -- real-usage bug found: this
+    # prompt previously gave the LLM bare numbers with NO normal-range
+    # context at all, so it had no way to independently notice an abnormal
+    # value and simply trusted the (at the time, buggy) upstream severity
+    # label -- a ferritin of 748.83 against a normal range of 12-135 got
+    # written up as "тұрақты" (stable). Now grounded in the actual range so
+    # the explanation is checkable, not just a label-following narrative.
+    values_summary_lines = []
+    for v in extraction.values:
+        shown_value = v.value if v.value is not None else v.value_text
+        r = ranges.get(v.marker_code) if v.marker_code else None
+        range_note = ""
+        if r and r.get("normal_low") is not None and r.get("normal_high") is not None:
+            range_note = f" (норма/normal: {r['normal_low']}-{r['normal_high']})"
+        values_summary_lines.append(f"- {v.marker_name_as_written} ({v.marker_code}): {shown_value} {v.unit or ''}{range_note}")
+    values_summary = "\n".join(values_summary_lines)
+
+    out_of_range = state.get("_out_of_range_markers") or []
+    out_of_range_note = (
+        f"\nMarkers outside their normal range (must be explicitly mentioned, this is why severity is not 'stable'): {', '.join(out_of_range)}"
+        if out_of_range
+        else ""
     )
+
     rag_text = "\n\n".join(f"[{r.get('source_title')}] {r.get('chunk_text')}" for r in state.get("rag_context", []))
     severity = state.get("severity", "stable")
     escalation = state.get("escalation_level", "routine")
@@ -242,8 +281,9 @@ def generate_explanation_node(state: dict) -> dict:
 
 Apply the skill above to this specific case.
 
-Extracted values:
+Extracted values (with normal reference ranges where known):
 {values_summary}
+{out_of_range_note}
 
 Severity assessment (computed deterministically upstream -- use the matching template, do not re-derive): {severity}
 Escalation level: {escalation}
@@ -357,6 +397,7 @@ def persist_node(state: dict) -> dict:
                     marker_code=v.marker_code,
                     marker_name_as_written=v.marker_name_as_written,
                     value_numeric=v.value,
+                    value_text=v.value_text,
                     unit=v.unit,
                     lab_reported_ref_low=v.lab_ref_low,
                     lab_reported_ref_high=v.lab_ref_high,

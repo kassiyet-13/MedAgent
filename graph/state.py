@@ -56,6 +56,7 @@ class MedAgentState(TypedDict, total=False):
     _inconsistent_rows: list[str]
     _critical_marker: str | None
     _critical_reason: str | None
+    _out_of_range_markers: list[str]
     _tone: str
     _patient_history_chunks_added: int
     _injection_detected: bool

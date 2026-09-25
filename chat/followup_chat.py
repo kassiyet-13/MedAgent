@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_ as sa_or, select
 from sqlalchemy.orm import Session
 
 from data.models import Document, LabValueRow
@@ -54,17 +54,22 @@ def _structured_lab_history_text(patient_id: str, per_marker_limit: int = 3) -> 
             .where(
                 Document.patient_id == patient_id,
                 LabValueRow.user_confirmed.is_(True),
-                LabValueRow.value_numeric.is_not(None),
+                sa_or(LabValueRow.value_numeric.is_not(None), LabValueRow.value_text.is_not(None)),
             )
             .order_by(Document.document_date.desc().nulls_last())
         ).all()
 
-    by_marker: dict[str, list[tuple[str, float, str | None]]] = {}
+    # Qualitative results (value_text, e.g. "отсутствуют", "1:80") get
+    # included here too -- otherwise the chat can't answer about a marker
+    # that was never numeric to begin with (same class of gap as the
+    # value_text fix in ocr/schema.py).
+    by_marker: dict[str, list[tuple[str, float | str, str | None]]] = {}
     for row, doc_date in rows:
         code = row.marker_code or row.marker_name_as_written
         by_marker.setdefault(code, [])
         if len(by_marker[code]) < per_marker_limit:
-            by_marker[code].append((doc_date or "белгісіз күн", row.value_numeric, row.unit))
+            shown_value = row.value_numeric if row.value_numeric is not None else row.value_text
+            by_marker[code].append((doc_date or "белгісіз күн", shown_value, row.unit))
 
     if not by_marker:
         return "(нет подтверждённых лабораторных значений в базе)"
