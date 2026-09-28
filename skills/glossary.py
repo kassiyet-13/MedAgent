@@ -121,6 +121,19 @@ MARKER_BLURBS: dict[str, dict[str, str]] = {
 }
 
 
+# Biochemistry markers grouped by what they reflect -- for the always-visible
+# glossary on the landing page (feedback: "биохимия анализдерінің қысқаша
+# түсініктемесін шығарып қойсақ, топқа бөлсек те болады, бауырға, өтке").
+# (kz title, ru title, marker codes)
+BIOCHEMISTRY_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("Бауыр жасушалары", "Клетки печени", ["ALT", "AST"]),
+    ("Өт жолдары — ПБХ-тың негізгі көрсеткіштері", "Желчные пути — главные показатели при ПБХ", ["ALP", "GGT"]),
+    ("Билирубин — улы заттарды тазарту", "Билирубин — очистка от токсинов", ["BILI_TOTAL", "BILI_DIRECT", "BILI_INDIRECT"]),
+    ("Бауырдың ақуыз өндіруі", "Синтез белка печенью", ["ALBUMIN", "TOTAL_PROTEIN"]),
+    ("Бүйрек және су-тұз балансы", "Почки и водно-солевой баланс", ["CREATININE", "UREA", "SODIUM"]),
+]
+
+
 def get_marker_blurb(marker_code: str | None, lang: str = "kz") -> str | None:
     if not marker_code:
         return None

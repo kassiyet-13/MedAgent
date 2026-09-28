@@ -24,6 +24,9 @@ class MedAgentState(TypedDict, total=False):
     extraction_confidence: float
     confirm_attempts: int
     user_confirmed_extraction: bool
+    # A saved document with the same analysis (other file, see data/dedup.py)
+    # that persist_node replaces instead of saving the analysis twice.
+    replace_document_id: str | None
     reference_ranges: dict
     trend: dict
     severity: Literal["improving", "stable", "worsening", "critical"]

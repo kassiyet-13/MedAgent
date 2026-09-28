@@ -35,13 +35,14 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 
+from app.trend_charts import KEY_LIVER_MARKERS, key_liver_section, load_ranges, meld_chart
 from data.dedup import compute_file_hash, find_existing_document, find_same_content_lab_document, same_content
-from data.models import Assessment, Document, ReferenceRange
+from data.models import Document, ReferenceRange
 from data.seed_db import get_engine
 from graph.build_graph import CHECKPOINT_DB, build_graph
 from mcp_server.tools.trend import compute_trend
 from ocr.marker_suggest import add_marker_entry, suggest_marker_entry
-from skills.glossary import get_marker_blurb
+from skills.glossary import BIOCHEMISTRY_GROUPS, get_marker_blurb
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 UPLOAD_DIR = ROOT / "data" / "uploads"
@@ -278,30 +279,31 @@ if st.session_state.result is None:
     # басты бетке ... трендті осында қосамыз ба?" Kept intentionally light
     # (last assessment + a small key-marker chart), the full breakdown
     # stays on the History/trends page rather than duplicating it here.
+    # Same "Негізгі бауыр көрсеткіштері" chart as the history page, per
+    # feedback: the 9-marker biochemistry chart tried first had its lines on
+    # top of each other. No "Соңғы жағдай" line (also feedback).
+    # (Real bug fixed on the way: the old st.line_chart at height=180 had
+    # its rotated full-timestamp x labels eat the whole plot area.)
     with Session(get_engine()) as _s:
-        _last_assessment = (
-            _s.query(Assessment).order_by(Assessment.created_at.desc()).first()
-        )
-    if _last_assessment:
-        st.markdown(
-            f"**Соңғы жағдай:** {SEVERITY_COLOR.get(_last_assessment.overall_status, '⚪')} "
-            f"{SEVERITY_LABEL_KZ.get(_last_assessment.overall_status, _last_assessment.overall_status)}"
-        )
-        with Session(get_engine()) as _s:
-            _trend = compute_trend(_s, "patient_default", ["ALT", "AST", "BILI_TOTAL"], lookback_n_reports=5)
-        _frames = []
-        for _code in ("ALT", "AST", "BILI_TOTAL"):
-            _vals = _trend["markers"].get(_code, {}).get("values", [])
-            if _vals:
-                _df = pd.DataFrame(_vals).rename(columns={"value": _code}).set_index("date")[[_code]]
-                _frames.append(_df)
-        if _frames:
-            _combined = _frames[0]
-            for _f in _frames[1:]:
-                _combined = _combined.join(_f, how="outer")
-            st.line_chart(_combined, height=180)
+        _trend = compute_trend(_s, "patient_default", KEY_LIVER_MARKERS, lookback_n_reports=20)
+        _ranges = load_ranges(_s)
+    st.subheader("Негізгі бауыр көрсеткіштері")
+    if key_liver_section(_trend["markers"], _ranges):
         st.caption("Толық тарих пен динамика -- сол жақтағы «Тарих және динамика» бетінде.")
-        st.divider()
+
+    # Same blurbs as the per-analysis glossary cards (skills/glossary.py),
+    # always available here, grouped -- feedback: for when a question about
+    # an analysis comes up without uploading anything.
+    st.subheader("Биохимия көрсеткіштері туралы қысқаша")
+    for _tab, _lang in zip(st.tabs(["Қазақша", "Орысша"]), ("kz", "ru")):
+        with _tab:
+            for _title_kz, _title_ru, _codes in BIOCHEMISTRY_GROUPS:
+                with st.expander(_title_kz if _lang == "kz" else _title_ru):
+                    for _code in _codes:
+                        _blurb = get_marker_blurb(_code, lang=_lang)
+                        if _blurb:
+                            st.markdown(_blurb)
+    st.divider()
 
 uploaded_file = st.file_uploader(
     "Анализ жүктеу",
@@ -464,7 +466,7 @@ def _render_lab_result(result: dict) -> None:
     meld_series = result.get("trend", {}).get("meld_na_series", [])
     if meld_series:
         st.subheader("MELD-Na")
-        st.line_chart(pd.DataFrame(meld_series).set_index("date"))
+        meld_chart(meld_series)
 
     # Glossary cards -- feedback item 3: plain-language "what is this
     # marker and why does it matter" per analyzed value, on demand
@@ -503,9 +505,10 @@ if result is not None:
                 st.warning(f"Бұл жолдар өз референс диапазонынан тыс, бірақ жалаушасыз: {', '.join(inconsistent)}")
             _twin = _same_content_saved(payload["extraction"])
             if _twin is not None:
-                st.warning(
-                    f"⚠️ Бұл анализ бұрын сақталған ({_twin.document_date}, файл: {_twin.source_filename}) -- "
-                    "мазмұны бірдей, тек файлы басқа. Қайта сақтасаңыз, тарихта екі рет көрінеді."
+                st.info(
+                    f"ℹ️ Бұл анализ бұрын сақталған ({_twin.document_date}, файл: {_twin.source_filename}) -- "
+                    "мазмұны бірдей, тек файлы басқа. Сақтағанда бұрынғы жазба жаңасымен ауыстырылады, "
+                    "тарихта екі рет көрінбейді."
                 )
 
             # Document-level metadata above the values table -- feedback:
@@ -690,7 +693,12 @@ if result is not None:
                 edited_extraction["panel_name"] = edited_panel_name or None
                 with st.spinner("Жалғасуда..."):
                     new_result = graph.invoke(
-                        Command(resume={"approved": True, "extraction": edited_extraction}), config=config
+                        Command(resume={
+                            "approved": True,
+                            "extraction": edited_extraction,
+                            "replace_document_id": _twin.id if _twin is not None else None,
+                        }),
+                        config=config,
                     )
                 st.session_state.result = new_result
                 st.rerun()

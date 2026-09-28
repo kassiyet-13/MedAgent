@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-import altair as alt
+
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -32,7 +32,8 @@ load_dotenv()
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from data.models import Document, ReferenceRange
+from app.trend_charts import BIOCHEMISTRY, chart_rows, key_liver_section, load_ranges, meld_chart, status_lines, trend_chart
+from data.models import Document
 from data.seed_db import get_engine
 from mcp_server.tools.trend import compute_trend
 
@@ -43,10 +44,8 @@ st.title("📈 Тарих және динамика")
 
 engine = get_engine()
 
-KEY_LIVER_MARKERS = ["ALT", "AST", "GGT", "ALP", "BILI_TOTAL", "ALBUMIN"]
-
 PANELS = {
-    "Биохимия (негізгі бауыр маркерлері)": ["ALT", "AST", "GGT", "ALP", "BILI_TOTAL", "BILI_DIRECT", "BILI_INDIRECT", "ALBUMIN", "TOTAL_PROTEIN"],
+    "Биохимия (негізгі бауыр маркерлері)": list(BIOCHEMISTRY),
     "Коагулограмма (қан ұю)": ["INR", "PT_SEC", "PTI", "APTT", "FIBRINOGEN", "TT_SEC"],
     "ОАК (негізгі)": ["WBC", "RBC", "HGB", "HCT", "PLATELETS", "ESR", "ESR_ANALYZER"],
     # ОАК's leukocyte differential and erythrocyte indices got added via the
@@ -74,70 +73,9 @@ for _code in _all_known_codes:
 
 ALL_MARKERS = [code for markers in PANELS.values() for code in markers]
 
-# Short Russian labels for chart legends specifically (an intentional,
-# scoped override of the app's KZ-first convention for THIS use only, per
-# explicit feedback: "қысқартылған орысша аттарын шығар, мысалы АЛТ, АСТ").
-# reference_ranges.json's marker_name_ru is the full clinical name, e.g.
-# "Аланинаминотрансфераза (АЛТ)" -- correct for the glossary/explanation
-# text, but too long for a chart legend: real bug found via this feedback --
-# long names made the legend row truncate ("...") and HIDE entries for
-# series that were still drawn on the chart, which is what actually looked
-# like "chart colors don't match the legend" (the line was there, its
-# legend swatch just wasn't visible). A hand-curated short-form dict is used
-# instead of trying to algorithmically parse the long name (parenthesized
-# text isn't reliably an abbreviation -- e.g. "Эозинофилы (абсолютное
-# число)" would wrongly yield "абсолютное число"). New markers added later
-# via the marker-suggest flow (ocr/marker_suggest.py) that aren't in this
-# dict fall back to the full marker_name_ru -- may need a short label added
-# here by hand if it turns out too long in practice.
-SHORT_LABEL_RU = {
-    "ALT": "АЛТ", "AST": "АСТ", "GGT": "ГГТ", "ALP": "ЩФ",
-    "BILI_TOTAL": "Общий билирубин", "BILI_DIRECT": "Прямой билирубин", "BILI_INDIRECT": "Непрямой билирубин",
-    "ALBUMIN": "Альбумин", "TOTAL_PROTEIN": "Общий белок",
-    "INR": "МНО", "PT_SEC": "ПВ", "PTI": "ПТИ", "APTT": "АЧТВ", "FIBRINOGEN": "Фибриноген", "TT_SEC": "ТВ",
-    "PLATELETS": "Тромбоциты", "WBC": "Лейкоциты", "RBC": "Эритроциты", "HGB": "Гемоглобин", "HCT": "Гематокрит",
-    "ESR": "СОЭ", "ESR_ANALYZER": "СОЭ (анализатор)",
-    "NEU_PCT": "Нейтрофилы %", "LYM_PCT": "Лимфоциты %", "MON_PCT": "Моноциты %", "EOS_PCT": "Эозинофилы %", "BAS_PCT": "Базофилы %",
-    "NEU_ABS": "Нейтрофилы абс.", "LYM_ABS": "Лимфоциты абс.", "MON_ABS": "Моноциты абс.", "EOS_ABS": "Эозинофилы абс.", "BAS_ABS": "Базофилы абс.",
-    "MCV": "MCV", "MCH": "MCH", "MCHC": "MCHC", "RDW_SD": "RDW-SD", "MPV": "MPV",
-    "CREATININE": "Креатинин", "UREA": "Мочевина", "SODIUM": "Натрий",
-    "AFP": "АФП", "AMA_M2": "АМА-M2", "IGM": "IgM",
-}
-
 with Session(engine) as session:
     trend = compute_trend(session, PATIENT_ID, ALL_MARKERS, lookback_n_reports=20)
-    MARKER_NAMES_RU = {r.marker_code: r.marker_name_ru for r in session.query(ReferenceRange).all()}
-
-
-def _label(code: str) -> str:
-    return SHORT_LABEL_RU.get(code) or MARKER_NAMES_RU.get(code, code)
-
-
-def _multi_line_chart(combined: pd.DataFrame) -> None:
-    """Renders a wide date-indexed DataFrame (one column per marker) as a
-    multi-line chart with a legend that WRAPS instead of truncating.
-
-    Real bug found via feedback ("түстер сәйкес емес" -- chart colors don't
-    match the legend): st.line_chart's built-in legend is a single row that,
-    past ~5-6 series, hides entries entirely rather than wrapping (confirmed
-    via the accessibility tree: an 8-series chart's legend only exposed 5
-    swatches in the DOM even after shortening labels) -- a line was drawn
-    with no visible matching legend entry, which is what actually looked
-    like a color mismatch. Altair's legend supports wrapping (`columns=`),
-    and since the chart marks and the legend swatches share one encoding,
-    correct color correspondence is structurally guaranteed rather than
-    hoped for."""
-    long_df = combined.reset_index().melt(id_vars="date", var_name="Көрсеткіш", value_name="value").dropna(subset=["value"])
-    chart = (
-        alt.Chart(long_df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("date:N", title=None),
-            y=alt.Y("value:Q", title=None),
-            color=alt.Color("Көрсеткіш:N", legend=alt.Legend(orient="bottom", columns=3, title=None)),
-        )
-    )
-    st.altair_chart(chart, use_container_width=True)
+    ranges = load_ranges(session)
 
 markers_with_data = {code: info for code, info in trend["markers"].items() if info["values"]}
 
@@ -147,20 +85,7 @@ if not markers_with_data:
 
 # --- Section 1: key liver markers overview (default view) ---
 st.subheader("Негізгі бауыр көрсеткіштері")
-key_present = [c for c in KEY_LIVER_MARKERS if c in markers_with_data]
-if key_present:
-    frames = []
-    for code in key_present:
-        df = pd.DataFrame(markers_with_data[code]["values"])
-        if not df.empty:
-            df = df.rename(columns={"value": _label(code)}).set_index("date")[[_label(code)]]
-            frames.append(df)
-    if frames:
-        combined = frames[0]
-        for f in frames[1:]:
-            combined = combined.join(f, how="outer")
-        _multi_line_chart(combined)
-else:
+if not key_liver_section(markers_with_data, ranges):
     st.caption("Негізгі бауыр маркерлері (АЛТ, АСТ, ГГТ, ЩФ...) әлі жоқ.")
 
 # --- Section 2: per-panel combined chart -- feedback: a single-marker
@@ -174,41 +99,12 @@ panel_markers_present = [c for c in PANELS[panel_choice] if c in markers_with_da
 if not panel_markers_present:
     st.caption("Бұл топта әлі деректер жоқ.")
 else:
-    frames = []
-    for code in panel_markers_present:
-        df = pd.DataFrame(markers_with_data[code]["values"])
-        if not df.empty:
-            df = df.rename(columns={"value": _label(code)}).set_index("date")[[_label(code)]]
-            frames.append(df)
-    if frames:
-        combined = frames[0]
-        for f in frames[1:]:
-            combined = combined.join(f, how="outer")
-        _multi_line_chart(combined)
-
-    # Declutter -- feedback: repeating "деректер жеткіліксіз" for every
-    # single-reading marker separately was noisy/confusing ("түсініксіз").
-    # Only markers with an actual direction (>=2 readings) get their own
-    # line; the rest are named once, together, in one short caption.
-    direction_label = {
-        "improving": "🟢 жақсарып келеді",
-        "worsening": "🟡 нашарлап келеді",
-        "stable": "⚪ тұрақты",
-    }
-    insufficient = []
-    for code in panel_markers_present:
-        info = markers_with_data[code]
-        if info["direction"] in direction_label:
-            st.caption(f"{_label(code)}: {direction_label[info['direction']]}")
-        else:
-            insufficient.append(_label(code))
-    if insufficient:
-        st.caption(f"Жеткіліксіз деректер (кемінде 2 өлшем қажет): {', '.join(insufficient)}")
+    trend_chart(chart_rows(markers_with_data, panel_markers_present, ranges))
+    status_lines(markers_with_data, panel_markers_present, ranges)
 
 if trend["meld_na_series"]:
     st.subheader("MELD-Na индексі")
-    meld_df = pd.DataFrame(trend["meld_na_series"])
-    st.line_chart(meld_df.set_index("date")["meld_na"])
+    meld_chart(trend["meld_na_series"])
     st.caption(
         "MELD-Na — бауыр ауруының ауырлығын бағалайтын халықаралық индекс. "
         "Бұл диагноз емес, тек динамиканы бақылауға арналған сан."

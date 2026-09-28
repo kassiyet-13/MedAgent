@@ -134,6 +134,7 @@ def human_confirm_node(state: dict) -> dict:
         "extraction": payload.get("extraction", state["extraction"]),
         "user_confirmed_extraction": bool(payload.get("approved")),
         "confirm_attempts": state.get("confirm_attempts", 0) + 1,
+        "replace_document_id": payload.get("replace_document_id"),
     }
 
 
@@ -404,9 +405,24 @@ def save_confirm_node(state: dict) -> dict:
     return {"user_confirmed_save": bool(payload.get("approved"))}
 
 
+def _delete_lab_document(session: Session, document_id: str) -> None:
+    assessment_ids = [a.id for a in session.query(Assessment).filter(Assessment.document_id == document_id)]
+    if assessment_ids:
+        session.query(EscalationLogEntry).filter(EscalationLogEntry.assessment_id.in_(assessment_ids)).delete(synchronize_session=False)
+    session.query(Assessment).filter(Assessment.document_id == document_id).delete(synchronize_session=False)
+    session.query(LabValueRow).filter(LabValueRow.document_id == document_id).delete(synchronize_session=False)
+    session.query(Document).filter(Document.id == document_id).delete(synchronize_session=False)
+
+
 def persist_node(state: dict) -> dict:
     extraction = LabExtraction(**state["extraction"])
     with Session(_engine) as session:
+        # Same analysis already saved from another file -- replace it rather
+        # than keep both (feedback: a re-sent analysis showed up twice in the
+        # history). Same transaction as the insert below: if saving fails,
+        # the old record is not lost.
+        if state.get("replace_document_id"):
+            _delete_lab_document(session, state["replace_document_id"])
         doc = Document(
             id=state["document_id"],
             patient_id=state["patient_id"],
