@@ -37,11 +37,10 @@ def search_knowledge(query: str, collection: Collection, top_k: int = 4, marker_
         return {"error": f"invalid collection '{collection}', must be one of {sorted(VALID_COLLECTIONS)}"}
 
     try:
-        import chromadb
-
+        from rag.chroma_client import get_chroma_client
         from rag.embedding import get_embedding_function
 
-        client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        client = get_chroma_client()
         existing = {c.name for c in client.list_collections()}
         if collection not in existing:
             return {
@@ -80,6 +79,12 @@ def search_knowledge(query: str, collection: Collection, top_k: int = 4, marker_
                     "source_title": (meta or {}).get("source_title"),
                     "source_url": (meta or {}).get("source_url"),
                     "section": (meta or {}).get("section"),
+                    # patient_history only -- lets the chat pull the rest of
+                    # the same document (chat/followup_chat.py)
+                    "document_id": (meta or {}).get("document_id"),
+                    "document_date": (meta or {}).get("document_date"),
+                    "document_kind": (meta or {}).get("document_kind"),
+                    "chunk_index": (meta or {}).get("chunk_index"),
                     "similarity_score": 1 - dist if dist is not None else None,
                 }
             )

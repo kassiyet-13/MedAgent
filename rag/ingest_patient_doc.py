@@ -28,7 +28,9 @@ COLLECTION_NAME = "patient_history"
 
 
 def get_or_create_patient_history_collection():
-    client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+    from rag.chroma_client import get_chroma_client
+
+    client = get_chroma_client()
     return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=get_embedding_function())
 
 

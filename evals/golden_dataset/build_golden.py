@@ -90,7 +90,9 @@ CHAT_CASES = [
     ("chat_02_spleen_kz", "Соңғы УЗИ бойынша көкбауырымның өлшемі қандай болды?",
      "Latest ultrasound 23.07.2026: spleen 109 x 44 mm (earlier, 13.12.2024: 103 x 41 mm; splenomegaly noted then)."),
     ("chat_03_udca_dose", "Какую дозу урсодезоксихолевой кислоты (УДХК) я принимала по выписке?",
-     "Per the discharge summary (May 2023): Ursodex (UDCA) 1000 mg/day; also Obetimus 5 mg twice a week. Earlier (Sept 2022) UDCA 500 mg/day had been recommended."),
+     "Per the discharge summary (May 2023): on admission taking Ursodex (UDCA) 1000 mg/day, plus Obetimus 5 mg twice a week; "
+     "discharge recommendation: UDCA (Ursosan/Ursofalk) 250 mg, 2 capsules twice a day (= 1000 mg/day), long-term. "
+     "Earlier (Sept 2022) UDCA 500 mg/day had been recommended."),
     ("chat_04_biopsy", "Что показала биопсия печени?",
      "Primary biliary cholangitis with transformation to cirrhosis, stage 4 (fibrosis F4 Metavir). Done in November 2022 (the document gives the date inconsistently: 13.11.22 / 03.11.23)."),
     ("chat_05_not_in_docs", "Маған бас миының МРТ-сы жасалды ма, нәтижесі қандай?",

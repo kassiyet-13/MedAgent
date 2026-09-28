@@ -32,7 +32,11 @@ for turn in st.session_state.chat_history:
         if turn["sources"]:
             with st.expander(f"Дереккөздер ({len(turn['sources'])})"):
                 for s in turn["sources"]:
-                    st.caption(f"[{s['type']}] score={s.get('similarity_score', 0):.2f} -- {s['chunk_text'][:150]}...")
+                    if s["type"] == "patient_history":
+                        label = f"{s.get('document_kind') or 'құжат'}, {s.get('document_date') or 'күні белгісіз'}"
+                    else:
+                        label = f"{s.get('source_title') or s['type']}, score={s.get('similarity_score') or 0:.2f}"
+                    st.caption(f"[{label}] {s['chunk_text'][:150]}...")
 
 question = st.chat_input("Сұрағыңызды жазыңыз...")
 if question:

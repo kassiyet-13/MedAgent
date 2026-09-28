@@ -140,8 +140,13 @@ Return a JSON object with exactly these keys:
 
 
 def judge_chat(question: str, reference: str, kz: str, ru: str, sources: list[dict]) -> dict:
+    # Was [:1500] per source: once the chat started passing whole documents
+    # (parent-document expansion), the judge saw only the first 1500 chars
+    # of a 6k-char discharge summary and marked a correct, quoted dose as
+    # "hallucinated". The judge must see what the model saw.
     sources_text = "\n\n".join(
-        f"[{s.get('type')}] {s.get('chunk_text', '')[:1500]}" for s in sources
+        f"[{s.get('type')} {s.get('document_kind') or ''} {s.get('document_date') or ''}] {s.get('chunk_text', '')[:8000]}"
+        for s in sources
     ) or "(none)"
     client = judge_client()
     resp = client.chat.completions.create(

@@ -29,6 +29,49 @@ DISCLAIMER_RU = "Это не является диагнозом. Пожалуй
 DISCLAIMER_KZ = "Бұл диагноз емес. Нәтижелерді дәрігеріңізбен талқылаңыз."
 
 
+# Parent-document expansion for patient_history. Eval finding (chat_02,
+# EVALS.md): "spleen size on the latest ultrasound?" retrieved the latest
+# ultrasound's liver chunk but not its spleen chunk -- same document, split
+# at chunking -- and answered with the 2024 size. A matched chunk now brings
+# its document along: a short document (ultrasound, FibroScan) whole, a long
+# one (discharge summary) as the matched chunk plus its neighbours.
+WHOLE_DOC_MAX_CHARS = 4000
+PATIENT_CONTEXT_MAX_CHARS = 14000
+
+
+def _expand_patient_chunks(chunks: list[dict]) -> list[dict]:
+    """Retrieved chunks -> one context block per source document, in rank
+    order, labelled with the document's kind and date."""
+    from rag.ingest_patient_doc import get_or_create_patient_history_collection
+
+    doc_ids = list(dict.fromkeys(c["document_id"] for c in chunks if c.get("document_id")))
+    if not doc_ids:
+        return chunks
+    coll = get_or_create_patient_history_collection()
+    blocks, total = [], 0
+    for doc_id in doc_ids:
+        got = coll.get(where={"document_id": doc_id}, include=["documents", "metadatas"])
+        parts = sorted(zip(got["metadatas"], got["documents"]), key=lambda p: p[0].get("chunk_index", 0))
+        if not parts:
+            continue
+        meta = parts[0][0]
+        full = "\n".join(text for _, text in parts)
+        if len(full) > WHOLE_DOC_MAX_CHARS:
+            hit = {c.get("chunk_index") for c in chunks if c.get("document_id") == doc_id}
+            keep = {i + d for i in hit if i is not None for d in (-1, 0, 1)}
+            full = "\n".join(text for m, text in parts if m.get("chunk_index") in keep)
+        if total + len(full) > PATIENT_CONTEXT_MAX_CHARS:
+            break
+        total += len(full)
+        blocks.append({
+            "chunk_text": full,
+            "document_id": doc_id,
+            "document_kind": meta.get("document_kind"),
+            "document_date": meta.get("document_date"),
+        })
+    return blocks
+
+
 def _load_skill_content() -> str:
     parts = []
     for fname in ("SKILL.md", "glossary_kz_ru.md", "tone_templates.md"):
@@ -86,7 +129,7 @@ def ask_history(query: str, patient_id: str = "patient_default") -> dict:
     patient_res = search_knowledge(query=query, collection="patient_history", top_k=4)
     clinical_res = search_knowledge(query=query, collection="clinical_guidelines", top_k=3)
 
-    patient_chunks = patient_res.get("results", [])
+    patient_chunks = _expand_patient_chunks(patient_res.get("results", []))
     clinical_chunks = clinical_res.get("results", [])
     lab_history_text = _structured_lab_history_text(patient_id)
     has_lab_history = "нет подтверждённых" not in lab_history_text
@@ -95,7 +138,10 @@ def ask_history(query: str, patient_id: str = "patient_default") -> dict:
         no_data_ru = "Кешіріңіз, сіздің тарихыңызда бұл сұраққа қатысты мәлімет таппадым. / Извините, я не нашёл в вашей истории информации по этому вопросу."
         return {"answer_ru": no_data_ru, "answer_kz": no_data_ru, "sources": []}
 
-    patient_text = "\n\n".join(f"[Сіздің құжатыңыз] {c['chunk_text']}" for c in patient_chunks)
+    patient_text = "\n\n".join(
+        f"[Сіздің құжатыңыз: {c.get('document_kind') or 'құжат'}, {c.get('document_date') or 'күні белгісіз'}]\n{c['chunk_text']}"
+        for c in patient_chunks
+    )
     clinical_text = "\n\n".join(f"[{c.get('source_title')}] {c['chunk_text']}" for c in clinical_chunks)
     skill_content = _load_skill_content()
 
