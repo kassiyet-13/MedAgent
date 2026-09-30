@@ -5,12 +5,14 @@
     "disclaimer": "For patient education only. Not a diagnostic tool. All critical thresholds must trigger escalation to a physician, never an independent conclusion.",
     "kz_translations_note": "Kazakh medical terms provided as a first pass; review with a native-speaking clinician before production use.",
     "sources": [
-      "AASLD Practice Guidance: Primary Biliary Cholangitis 2018 update",
-      "EASL Clinical Practice Guidelines: The diagnosis and management of patients with primary biliary cholangitis 2017",
-      "AASLD/EASL cirrhosis and complications guidance (ascites, hepatic encephalopathy)",
-      "Standard clinical chemistry reference intervals (adult, SI units) -- most normal_low/normal_high values here, since routine lab reference intervals are physiological, not protocol-specific",
-      "Kazakhstan MoH Clinical Protocol for Liver Cirrhosis, 2020 (Protocol No. 135, see rag/corpus/clinical/02_kz_protocol_cirrhosis.md) -- specifically informs the CREATININE critical_high note (HRS Type I criteria) and is the source for the FibroScan F4 cutoff referenced in cirrhosis_note text; the protocol does not publish its own separate numeric reference ranges for routine markers, which is why most other fields cite general clinical chemistry standards instead"
-    ]
+      "APASL clinical practice guidance on PBC, open access (https://pmc.ncbi.nlm.nih.gov/articles/PMC8843914/, see rag/corpus/clinical/01_pbc_diagnosis_udca_response.md) -- the PBC guideline actually read: diagnosis, UDCA response, Paris-II criteria behind udca_response_role",
+      "Kazakhstan MoH Clinical Protocol 'Primary biliary cholangitis, primary sclerosing cholangitis', Protocol No. 35, 14 Dec 2017 (https://diseases.medelement.com/disease/первичный-билиарный-холангит-первичный-склерозирующий-холангит/15632) -- PBC-specific KZ protocol: UDCA/second-line dosing, pruritus ladder, monitoring schedule (rag/corpus/clinical/09, 10, 13)",
+      "Kazakhstan MoH Clinical Protocol 'Liver cirrhosis in adults', Protocol No. 135, 2020 (https://diseases.medelement.com/disease/цирроз-печени-у-взрослых-кп-рк-2020/16681, see rag/corpus/clinical/02_kz_protocol_cirrhosis.md) -- informs the CREATININE critical_high note (HRS Type I criteria) and the FibroScan F4 cutoff in cirrhosis_note text; the protocol publishes no separate numeric reference ranges for routine markers",
+      "AASLD public practice-guidance summary pages on ascites / hepatorenal syndrome (rag/corpus/clinical/05_ascites_hrs_aasld.md) -- sodium/creatinine context",
+      "Standard clinical chemistry reference intervals (adult, SI units) -- most normal_low/normal_high values, since routine lab reference intervals are physiological, not protocol-specific",
+      "Cited by title only, full text NOT read (paywalled / blocked, 402/403 on fetch -- see rag/corpus/clinical/SOURCES.md 'Access notes'): AASLD Practice Guidance 'Primary Biliary Cholangitis' 2018 update; EASL Clinical Practice Guidelines on PBC 2017. Their diagnostic/UDCA-response content is covered through the APASL guidance above."
+    ],
+    "limitations": "Sources are listed for the table as a whole, not per value. Critical thresholds (e.g. PLATELETS <= 50, INR >= 2.5, SODIUM <= 125) are commonly used clinical alert values prepared during development from general clinical knowledge; they have NOT been reviewed by a physician. Ranges for markers added through the in-app 'suggest & approve' flow were drafted by an LLM from the range printed on the lab report and approved by the user. Review with a hepatologist before any real medical use."
   },
   "markers": [
     {
