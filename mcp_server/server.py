@@ -4,18 +4,32 @@ MedAgent's own MCP server (stdio transport), exposing 3 tools.
 Run directly for manual testing:      python -m mcp_server.server
 Inspect with the official MCP inspector:  mcp dev mcp_server/server.py
 
-Why this is an MCP server and not just plain Python functions called
-in-process (the "why MCP" defense answer, plan Section 3):
+Why this is an MCP server and not just plain Python functions (the "why
+MCP" defense answer, plan Section 3):
 1. Typed, protocol-level tool schemas usable by ANY MCP client (Claude
-   Desktop, a future clinician-facing tool, this app's own LangGraph nodes)
-   without touching this codebase.
+   Desktop, the MCP Inspector, a future clinician-facing tool) without
+   touching this codebase.
 2. Each tool call is a separately traceable step, visible in the MCP
-   inspector standalone and in LangSmith once wired into the graph.
+   inspector standalone.
 3. Tools are independently unit-testable and swappable (e.g. the Chroma
    backend behind search_knowledge could become Qdrant without any client
    code changing).
+
+The tool logic lives once, in mcp_server/tools/. This server exposes it over
+MCP for external clients; inside the app, the LangGraph nodes and pages call
+the same functions in-process (no subprocess/serialization per call), so
+both paths share one implementation and behave identically.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Project root first on sys.path. `mcp dev mcp_server/server.py` runs this
+# file with mcp_server/ as the script dir, where mcp_server/data/ (the
+# reference_ranges.json folder) shadows the root `data` package ->
+# "ModuleNotFoundError: No module named 'data.seed_db'".
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp.server.mcpserver import MCPServer
 from sqlalchemy.orm import Session
