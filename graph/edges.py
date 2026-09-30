@@ -43,6 +43,6 @@ def route_after_severity(state: dict) -> str:
 def route_after_rag(state: dict) -> str:
     results = state.get("rag_context", [])
     low_relevance = (not results) or all((r.get("similarity_score") or 0) < 0.3 for r in results)
-    if low_relevance and state.get("rag_retry_count", 0) < MAX_RAG_RETRIES:
+    if low_relevance and state.get("rag_attempts", 0) <= MAX_RAG_RETRIES:  # 1 search + up to 2 retries
         return "rag_retrieve_node"
     return "generate_explanation_node"

@@ -64,7 +64,7 @@ def _run_upstream(state: dict) -> dict:
     for node in (lookup_reference_ranges_node, compute_trend_node, classify_severity_node):
         state.update(node(state))
     state.update(rag_retrieve_node(state))
-    while route_after_rag(state) == "rag_retrieve_node" and state.get("rag_retry_count", 0) < MAX_RAG_RETRIES:
+    while route_after_rag(state) == "rag_retrieve_node":  # route_after_rag caps it at 1 + MAX_RAG_RETRIES
         state.update(rag_retrieve_node(state))
     return state
 

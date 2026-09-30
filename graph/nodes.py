@@ -231,23 +231,51 @@ def encouragement_node(state: dict) -> dict:
 # --- RAG (shared by lab explanation and, later, followup_chat) ---
 
 
-def rag_retrieve_node(state: dict) -> dict:
-    severity = state.get("severity", "stable")
-    query_map = {
-        "critical": "urgent escalation critical lab values cirrhosis PBC what to do",
-        "worsening": "worsening liver panel cirrhosis PBC lifestyle recommendations diet sleep exercise",
-        "improving": "improving liver panel cirrhosis PBC encouragement",
-        "stable": "stable liver panel cirrhosis PBC monitoring",
-    }
-    query = query_map.get(severity, query_map["stable"])
-    retry_count = state.get("rag_retry_count", 0)
-    result = _search_knowledge(query=query, collection="clinical_guidelines", top_k=4)
-    results = result.get("results", [])
+RAG_TOPIC_BY_SEVERITY = {
+    "critical": "urgent escalation critical lab values cirrhosis PBC what to do",
+    "worsening": "worsening liver panel cirrhosis PBC lifestyle recommendations diet sleep exercise",
+    "improving": "improving liver panel cirrhosis PBC encouragement",
+    "stable": "stable liver panel cirrhosis PBC monitoring",
+}
+RAG_BROADEST_QUERY = "primary biliary cholangitis cirrhosis lab results explanation for patients"
 
-    low_relevance = (not results) or all((r.get("similarity_score") or 0) < 0.3 for r in results)
-    if low_relevance and retry_count < 2:
-        return {"rag_context": results, "rag_retry_count": retry_count + 1}
-    return {"rag_context": results, "rag_retry_count": retry_count}
+
+def _rag_query(state: dict, attempt: int) -> str:
+    """Attempt 0: severity topic + the markers actually out of range (so an
+    ALP/GGT-driven panel and an albumin-driven one retrieve different
+    guidance). Attempt 1: the severity topic alone. Attempt 2: broadest.
+    Found while preparing the defense walkthrough: the retry loop used to
+    resend the SAME query, so a retry could only return the same chunks."""
+    topic = RAG_TOPIC_BY_SEVERITY.get(state.get("severity", "stable"), RAG_TOPIC_BY_SEVERITY["stable"])
+    if attempt == 0:
+        ranges = state.get("reference_ranges", {})
+        names = [
+            (ranges.get(code) or {}).get("marker_name_en") or code
+            for code in list(dict.fromkeys(state.get("_out_of_range_markers") or []))[:5]
+        ]
+        return f"{', '.join(names)} abnormal; {topic}" if names else topic
+    if attempt == 1:
+        return topic
+    return RAG_BROADEST_QUERY
+
+
+def _best_similarity(results: list[dict]) -> float:
+    return max(((r.get("similarity_score") or 0) for r in results), default=0.0)
+
+
+def rag_retrieve_node(state: dict) -> dict:
+    # rag_attempts = searches already made; also the index of this attempt.
+    # (Was rag_retry_count, whose increment rule and route_after_rag's check
+    # disagreed: the loop documented as "up to 2 retries" did only 1.)
+    attempt = state.get("rag_attempts", 0)
+    query = _rag_query(state, attempt)
+    results = _search_knowledge(query=query, collection="clinical_guidelines", top_k=4).get("results", [])
+
+    # A broader retry must not throw away a better earlier result.
+    previous = state.get("rag_context") or []
+    if attempt > 0 and _best_similarity(previous) > _best_similarity(results):
+        results = previous
+    return {"rag_context": results, "rag_attempts": attempt + 1, "rag_query": query}
 
 
 # --- Explanation generation ---

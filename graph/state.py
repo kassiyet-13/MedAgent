@@ -39,7 +39,8 @@ class MedAgentState(TypedDict, total=False):
 
     # --- RAG / explanation (shared) ---
     rag_context: list[dict]
-    rag_retry_count: int
+    rag_attempts: int  # searches made so far (1 + up to MAX_RAG_RETRIES)
+    rag_query: str  # the query actually used on the last attempt (visible in the trace)
     explanation_ru: str
     explanation_kz: str
     disclaimer_present: bool
